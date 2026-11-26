@@ -31,9 +31,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
@@ -42,6 +41,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.productexplorer.ui.theme.ProductExplorerTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,7 +53,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             ProductExplorerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // TP10 : le container récupère le ViewModel, qui fournit les données et l'état
+                    // le container récupère le ViewModel, qui fournit l'état (StateFlow)
                     ProductCatalogContainer(
                         onProductClick = {
                             // Plus tard : ouvrir le détail du produit
@@ -115,6 +118,15 @@ fun sampleProductOutOfStock(): ProductUi {
     )
 }
 
+// TP11 : tout l'état de l'écran catalogue regroupé dans un seul objet immuable
+data class ProductCatalogUiState(
+    val products: List<ProductUi> = emptyList(), // liste déjà filtrée, prête à afficher
+    val categories: List<String> = emptyList(),
+    val searchQuery: String = "",
+    val showOnlyInStock: Boolean = false,
+    val favoriteProductIds: List<Int> = emptyList()
+)
+
 // Liste de produits pour le catalogue (TP6)
 fun sampleProducts(): List<ProductUi> {
     return listOf(
@@ -168,30 +180,30 @@ fun sampleCategories(): List<String> {
 
 // ---------- TP6 : catalogue de produits ----------
 
-// ---------- TP10 : ViewModel ----------
+// ---------- TP10 / TP11 : ViewModel + StateFlow ----------
 
 // Le ViewModel garde l'état de l'écran catalogue. Il survit à la rotation de l'écran
-// (il n'est pas recréé avec l'Activity) et sépare la logique de l'interface.
+// et sépare la logique de l'interface.
+// TP11 : l'état est exposé avec un StateFlow, un flux qui contient toujours la valeur actuelle.
 class ProductCatalogViewModel : ViewModel() {
 
-    // données locales : c'est maintenant le ViewModel qui les fournit
     private val allProducts: List<ProductUi> = sampleProducts()
+    private val allCategories: List<String> = sampleCategories()
 
-    val categories: List<String> = sampleCategories()
+    // MutableStateFlow privé : seul le ViewModel peut modifier l'état
+    private val _uiState = MutableStateFlow(
+        ProductCatalogUiState(
+            products = allProducts,
+            categories = allCategories
+        )
+    )
 
-    // états observés par Compose ; private set = modifiables seulement depuis le ViewModel
-    var searchQuery by mutableStateOf("")
-        private set
+    // StateFlow public en lecture seule : l'interface l'observe
+    val uiState: StateFlow<ProductCatalogUiState> = _uiState.asStateFlow()
 
-    var showOnlyInStock by mutableStateOf(false)
-        private set
-
-    var favoriteProductIds by mutableStateOf(listOf<Int>())
-        private set
-
-    // liste affichée, calculée à partir de l'état actuel
-    val filteredProducts: List<ProductUi>
-        get() = allProducts.filter { product ->
+    // recalcule la liste affichée à partir des filtres
+    private fun filterProducts(searchQuery: String, showOnlyInStock: Boolean): List<ProductUi> {
+        return allProducts.filter { product ->
             val matchesSearch =
                 product.title.contains(searchQuery, ignoreCase = true) ||
                     product.brand.contains(searchQuery, ignoreCase = true) ||
@@ -202,40 +214,64 @@ class ProductCatalogViewModel : ViewModel() {
 
             matchesSearch && matchesStock
         }
+    }
 
-    // événements envoyés par l'interface
+    // update + copy : on crée un nouvel état à partir de l'ancien (jamais modifié directement)
     fun onSearchQueryChange(newValue: String) {
-        searchQuery = newValue
+        _uiState.update { currentState ->
+            currentState.copy(
+                searchQuery = newValue,
+                products = filterProducts(
+                    searchQuery = newValue,
+                    showOnlyInStock = currentState.showOnlyInStock
+                )
+            )
+        }
     }
 
     fun onToggleStockFilter() {
-        showOnlyInStock = !showOnlyInStock
+        _uiState.update { currentState ->
+            val newShowOnlyInStock = !currentState.showOnlyInStock
+            currentState.copy(
+                showOnlyInStock = newShowOnlyInStock,
+                products = filterProducts(
+                    searchQuery = currentState.searchQuery,
+                    showOnlyInStock = newShowOnlyInStock
+                )
+            )
+        }
     }
 
     fun onFavoriteClick(productId: Int) {
-        favoriteProductIds = if (favoriteProductIds.contains(productId)) {
-            favoriteProductIds - productId
-        } else {
-            favoriteProductIds + productId
+        _uiState.update { currentState ->
+            val newFavoriteIds = if (currentState.favoriteProductIds.contains(productId)) {
+                currentState.favoriteProductIds - productId
+            } else {
+                currentState.favoriteProductIds + productId
+            }
+            currentState.copy(favoriteProductIds = newFavoriteIds)
         }
     }
 }
 
-// Le container fait le lien entre le ViewModel et l'écran stateless
+// Le container observe le StateFlow et transmet l'état à l'écran stateless
 @Composable
 fun ProductCatalogContainer(
     onProductClick: (ProductUi) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ProductCatalogViewModel = viewModel()
 ) {
+    // collectAsState : chaque nouvelle valeur du StateFlow provoque une recomposition
+    val uiState by viewModel.uiState.collectAsState()
+
     ProductCatalogScreen(
-        products = viewModel.filteredProducts,
-        categories = viewModel.categories,
-        searchQuery = viewModel.searchQuery,
+        products = uiState.products,
+        categories = uiState.categories,
+        searchQuery = uiState.searchQuery,
         onSearchQueryChange = viewModel::onSearchQueryChange,
-        showOnlyInStock = viewModel.showOnlyInStock,
+        showOnlyInStock = uiState.showOnlyInStock,
         onToggleStockFilter = viewModel::onToggleStockFilter,
-        favoriteProductIds = viewModel.favoriteProductIds,
+        favoriteProductIds = uiState.favoriteProductIds,
         onFavoriteClick = viewModel::onFavoriteClick,
         onProductClick = onProductClick,
         modifier = modifier
