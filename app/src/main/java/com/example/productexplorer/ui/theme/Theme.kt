@@ -18,7 +18,9 @@ private val LightColorScheme = lightColorScheme(
     background = Color(0xFFF7FBF6),
     onBackground = Color(0xFF191C1A),
     surface = Color(0xFFFFFFFF),
-    onSurface = Color(0xFF191C1A)
+    onSurface = Color(0xFF191C1A),
+    // couleur par défaut des Card de l'écran détail (sinon Material garde un violet)
+    surfaceContainerHighest = Color(0xFFE1EAE4)
 )
 
 // Palette sombre : mêmes rôles, couleurs adaptées au fond foncé
@@ -29,7 +31,8 @@ private val DarkColorScheme = darkColorScheme(
     background = Color(0xFF101411),
     onBackground = Color(0xFFE0E4DF),
     surface = Color(0xFF1C211D),
-    onSurface = Color(0xFFE0E4DF)
+    onSurface = Color(0xFFE0E4DF),
+    surfaceContainerHighest = Color(0xFF2A322D)
 )
 
 // Arrondis utilisés partout via MaterialTheme.shapes

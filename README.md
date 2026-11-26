@@ -14,6 +14,9 @@ des commits montre l'évolution (un commit par TP).
 | TP7 | Personnalisation graphique (Material 3, thème clair / sombre) | ✅ |
 | TP8 | Catalogue interactif (recherche, filtre stock, favoris) | ✅ |
 | TP9 | State Hoisting (composants stateful / stateless) | ✅ |
+| TP10 | Gestion de l'écran avec un `ViewModel` | ✅ |
+| TP11 | Mise à jour dynamique avec `StateFlow` | ✅ |
+| Autonomie | Filtre par catégorie, favoris uniquement, tri par prix, écran détail | ✅ |
 
 ## Captures
 
@@ -24,6 +27,10 @@ des commits montre l'évolution (un commit par TP).
 | TP9 – Catalogue (clair) | TP9 – Catalogue (sombre) |
 |---|---|
 | ![Catalogue clair](screenshots/tp9-catalogue-clair.png) | ![Catalogue sombre](screenshots/tp9-catalogue-sombre.png) |
+
+| TP11 – Filtres et tri (autonomie) | TP11 – Thème sombre | Détail ouvert depuis le catalogue |
+|---|---|---|
+| ![Filtres](screenshots/tp11-catalogue-filtres.png) | ![Sombre](screenshots/tp11-catalogue-sombre.png) | ![Détail](screenshots/autonomie-detail.png) |
 
 ## TP4 – Écran de détail produit
 
@@ -98,6 +105,51 @@ Principe : **les données descendent, les événements remontent.**
 Previews : `ProductCatalogContainerLightPreview`, `ProductCatalogContainerDarkPreview` (écran complet
 avec son état) et `ProductCatalogScreenStatelessPreview` (écran stateless avec des valeurs fixes).
 
+## TP10 – ViewModel
+
+L'état du catalogue quitte les composables pour aller dans `ProductCatalogViewModel` :
+
+- le ViewModel fournit les données locales (`allProducts` privé, `categories` exposé) ;
+- `searchQuery`, `showOnlyInStock` et `favoriteProductIds` sont des `mutableStateOf` avec
+  `private set` : seul le ViewModel peut les modifier, via des fonctions d'événement
+  (`onSearchQueryChange`, `onToggleStockFilter`, `onFavoriteClick`) ;
+- `filteredProducts` est calculée à partir de l'état ;
+- `ProductCatalogContainer` récupère le ViewModel avec `viewModel()` et fait la passerelle vers
+  `ProductCatalogScreen` (toujours stateless) ;
+- l'état survit à la rotation de l'écran ; les previews utilisent l'écran stateless.
+
+Organisation : `MainActivity` → `ProductCatalogContainer` → `ProductCatalogViewModel` →
+`ProductCatalogScreen` → `ProductListItem`.
+
+## TP11 – StateFlow
+
+- `ProductCatalogUiState` (`data class`) regroupe **tout** l'état de l'écran ;
+- le ViewModel garde un `MutableStateFlow` privé (`_uiState`) et expose un `StateFlow` en lecture
+  seule (`uiState = _uiState.asStateFlow()`) ;
+- chaque événement produit un **nouvel état** avec `_uiState.update { it.copy(...) }` ;
+- le container observe l'état avec `collectAsState()` : chaque nouvelle valeur recompose l'écran.
+
+Principe : le ViewModel publie un état, Compose l'observe, l'interface se met à jour.
+
+## Fonctionnalités ajoutées en autonomie
+
+Toutes sont intégrées au `StateFlow` (champs ajoutés dans `ProductCatalogUiState`, une fonction
+d'événement par action dans le ViewModel) :
+
+- **Filtre par catégorie** : les chips de catégorie sont cliquables (`selectedCategory`), la
+  catégorie choisie passe en couleur `primary`, un second clic la désélectionne ;
+- **Favoris uniquement** : `FilterChip` (`showOnlyFavorites`) ; retirer un favori pendant que le
+  filtre est actif le fait disparaître de la liste ;
+- **Tri par prix** : `enum class PriceSort` (aucun → croissant → décroissant) ;
+- **Liste vide** : message « Aucun produit ne correspond… » et bouton **Réinitialiser les filtres**
+  (les favoris sont conservés) ;
+- **Écran détail** : « Voir le produit » ouvre l'écran du TP4 (`selectedProduct` dans l'état) avec
+  un bouton « Retour au catalogue » ; le bouton retour d'Android (`BackHandler`) revient aussi au
+  catalogue, en gardant les filtres ; la fiche défile (`verticalScroll`) sur les petits écrans.
+
+Tous les filtres sont combinés dans une seule fonction privée du ViewModel
+(`withFilteredProducts()`), appelée après chaque changement d'état.
+
 ## Notions utilisées
 
 - composants : `Text`, `Button`, `Icon`, `Image`, `Card`, `OutlinedTextField`, `Surface` ;
@@ -106,6 +158,8 @@ avec son état) et `ProductCatalogScreenStatelessPreview` (écran stateless avec
 - Material 3 : `ColorScheme`, `Typography`, `Shapes`, thème clair / sombre ;
 - état : `mutableStateOf`, `remember`, `rememberSaveable` ;
 - State Hoisting : composables stateful / stateless, callbacks ;
+- `ViewModel`, `viewModel()`, `StateFlow` / `MutableStateFlow`, `update`, `copy`, `collectAsState()` ;
+- `BackHandler`, `FilterChip`, `enum class` ;
 - `data class` pour les données du produit, previews.
 
 ## Lancer le projet
@@ -117,7 +171,7 @@ Ouvrir le dossier dans Android Studio et lancer la configuration `app`
 
 ```
 app/src/main/java/com/example/productexplorer/
-├── MainActivity.kt   // données, écrans (détail, accueil, catalogue), composables, previews
+├── MainActivity.kt   // données, UiState, ViewModel, écrans (détail, accueil, catalogue), previews
 └── ui/theme/         // Theme.kt (couleurs + formes), Type.kt (typographie)
 ```
 

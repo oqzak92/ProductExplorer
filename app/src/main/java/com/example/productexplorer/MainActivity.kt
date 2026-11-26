@@ -2,6 +2,7 @@ package com.example.productexplorer
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
@@ -20,6 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
@@ -33,6 +36,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -57,10 +61,8 @@ class MainActivity : ComponentActivity() {
             ProductExplorerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     // le container récupère le ViewModel, qui fournit l'état (StateFlow)
+                    // le clic sur "Voir le produit" ouvre maintenant le détail (géré par le ViewModel)
                     ProductCatalogContainer(
-                        onProductClick = {
-                            // Plus tard : ouvrir le détail du produit
-                        },
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -131,7 +133,8 @@ data class ProductCatalogUiState(
     // fonctionnalités ajoutées en autonomie
     val selectedCategory: String? = null, // null = toutes les catégories
     val showOnlyFavorites: Boolean = false,
-    val priceSort: PriceSort = PriceSort.NONE
+    val priceSort: PriceSort = PriceSort.NONE,
+    val selectedProduct: ProductUi? = null // produit ouvert dans l'écran détail, null = catalogue
 )
 
 // Ordre de tri du catalogue
@@ -282,6 +285,15 @@ class ProductCatalogViewModel : ViewModel() {
         _uiState.update { it.copy(priceSort = it.priceSort.next()).withFilteredProducts() }
     }
 
+    // Autonomie : ouvrir / fermer l'écran détail d'un produit
+    fun onProductClick(product: ProductUi) {
+        _uiState.update { it.copy(selectedProduct = product) }
+    }
+
+    fun onBackToCatalog() {
+        _uiState.update { it.copy(selectedProduct = null) }
+    }
+
     // Autonomie : remet tous les filtres à zéro (les favoris sont conservés)
     fun onResetFilters() {
         _uiState.update { currentState ->
@@ -296,12 +308,24 @@ class ProductCatalogViewModel : ViewModel() {
 // Le container observe le StateFlow et transmet l'état à l'écran stateless
 @Composable
 fun ProductCatalogContainer(
-    onProductClick: (ProductUi) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ProductCatalogViewModel = viewModel()
 ) {
     // collectAsState : chaque nouvelle valeur du StateFlow provoque une recomposition
     val uiState by viewModel.uiState.collectAsState()
+
+    // Autonomie : si un produit est sélectionné, on affiche son détail (écran du TP4)
+    val selectedProduct = uiState.selectedProduct
+    if (selectedProduct != null) {
+        // le bouton retour d'Android revient au catalogue au lieu de quitter l'app
+        BackHandler(onBack = viewModel::onBackToCatalog)
+        ProductDetailWithBack(
+            product = selectedProduct,
+            onBackClick = viewModel::onBackToCatalog,
+            modifier = modifier
+        )
+        return
+    }
 
     ProductCatalogScreen(
         products = uiState.products,
@@ -319,9 +343,36 @@ fun ProductCatalogContainer(
         priceSort = uiState.priceSort,
         onPriceSortClick = viewModel::onPriceSortClick,
         onResetFilters = viewModel::onResetFilters,
-        onProductClick = onProductClick,
+        onProductClick = viewModel::onProductClick,
         modifier = modifier
     )
+}
+
+// Autonomie : écran détail du TP4 avec un bouton pour revenir au catalogue
+@Composable
+fun ProductDetailWithBack(
+    product: ProductUi,
+    onBackClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        TextButton(
+            onClick = onBackClick,
+            modifier = Modifier.padding(start = 8.dp, top = 8.dp)
+        ) {
+            Text(text = "← Retour au catalogue")
+        }
+        ProductDetailScreen(
+            product = product,
+            onAddToCartClick = {
+                // Plus tard : ajouter au panier
+            }
+        )
+    }
 }
 
 // Composable STATELESS : pas de remember ici, il affiche ce qu'il reçoit et signale les événements
@@ -547,6 +598,7 @@ fun ProductDetailScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState()) // la fiche défile sur les petits écrans
             .padding(16.dp)
     ) {
         ProductImage(
