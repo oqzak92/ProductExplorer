@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,8 +25,10 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
@@ -124,8 +127,22 @@ data class ProductCatalogUiState(
     val categories: List<String> = emptyList(),
     val searchQuery: String = "",
     val showOnlyInStock: Boolean = false,
-    val favoriteProductIds: List<Int> = emptyList()
+    val favoriteProductIds: List<Int> = emptyList(),
+    // fonctionnalités ajoutées en autonomie
+    val selectedCategory: String? = null, // null = toutes les catégories
+    val showOnlyFavorites: Boolean = false,
+    val priceSort: PriceSort = PriceSort.NONE
 )
+
+// Ordre de tri du catalogue
+enum class PriceSort(val label: String) {
+    NONE("Tri : aucun"),
+    ASCENDING("Prix croissant"),
+    DESCENDING("Prix décroissant");
+
+    // passe au tri suivant à chaque clic : aucun -> croissant -> décroissant -> aucun
+    fun next(): PriceSort = entries[(ordinal + 1) % entries.size]
+}
 
 // Liste de produits pour le catalogue (TP6)
 fun sampleProducts(): List<ProductUi> {
@@ -201,45 +218,38 @@ class ProductCatalogViewModel : ViewModel() {
     // StateFlow public en lecture seule : l'interface l'observe
     val uiState: StateFlow<ProductCatalogUiState> = _uiState.asStateFlow()
 
-    // recalcule la liste affichée à partir des filtres
-    private fun filterProducts(searchQuery: String, showOnlyInStock: Boolean): List<ProductUi> {
-        return allProducts.filter { product ->
+    // Recalcule la liste affichée à partir de TOUS les filtres de l'état.
+    // Chaque événement modifie l'état puis appelle cette fonction : un seul endroit pour la logique.
+    private fun ProductCatalogUiState.withFilteredProducts(): ProductCatalogUiState {
+        val filtered = allProducts.filter { product ->
             val matchesSearch =
                 product.title.contains(searchQuery, ignoreCase = true) ||
                     product.brand.contains(searchQuery, ignoreCase = true) ||
                     product.category.contains(searchQuery, ignoreCase = true)
 
-            val matchesStock =
-                !showOnlyInStock || product.stock > 0
+            val matchesStock = !showOnlyInStock || product.stock > 0
+            val matchesCategory = selectedCategory == null || product.category == selectedCategory
+            val matchesFavorites = !showOnlyFavorites || favoriteProductIds.contains(product.id)
 
-            matchesSearch && matchesStock
+            matchesSearch && matchesStock && matchesCategory && matchesFavorites
         }
+
+        val sorted = when (priceSort) {
+            PriceSort.NONE -> filtered
+            PriceSort.ASCENDING -> filtered.sortedBy { it.price }
+            PriceSort.DESCENDING -> filtered.sortedByDescending { it.price }
+        }
+
+        return copy(products = sorted)
     }
 
     // update + copy : on crée un nouvel état à partir de l'ancien (jamais modifié directement)
     fun onSearchQueryChange(newValue: String) {
-        _uiState.update { currentState ->
-            currentState.copy(
-                searchQuery = newValue,
-                products = filterProducts(
-                    searchQuery = newValue,
-                    showOnlyInStock = currentState.showOnlyInStock
-                )
-            )
-        }
+        _uiState.update { it.copy(searchQuery = newValue).withFilteredProducts() }
     }
 
     fun onToggleStockFilter() {
-        _uiState.update { currentState ->
-            val newShowOnlyInStock = !currentState.showOnlyInStock
-            currentState.copy(
-                showOnlyInStock = newShowOnlyInStock,
-                products = filterProducts(
-                    searchQuery = currentState.searchQuery,
-                    showOnlyInStock = newShowOnlyInStock
-                )
-            )
-        }
+        _uiState.update { it.copy(showOnlyInStock = !it.showOnlyInStock).withFilteredProducts() }
     }
 
     fun onFavoriteClick(productId: Int) {
@@ -249,7 +259,36 @@ class ProductCatalogViewModel : ViewModel() {
             } else {
                 currentState.favoriteProductIds + productId
             }
-            currentState.copy(favoriteProductIds = newFavoriteIds)
+            // on refiltre : avec "Favoris uniquement", retirer un favori le fait disparaître
+            currentState.copy(favoriteProductIds = newFavoriteIds).withFilteredProducts()
+        }
+    }
+
+    // Autonomie : filtre par catégorie (re-cliquer sur la catégorie choisie la désélectionne)
+    fun onCategoryClick(category: String) {
+        _uiState.update { currentState ->
+            val newCategory = if (currentState.selectedCategory == category) null else category
+            currentState.copy(selectedCategory = newCategory).withFilteredProducts()
+        }
+    }
+
+    // Autonomie : filtre "Favoris uniquement"
+    fun onToggleFavoritesFilter() {
+        _uiState.update { it.copy(showOnlyFavorites = !it.showOnlyFavorites).withFilteredProducts() }
+    }
+
+    // Autonomie : tri par prix
+    fun onPriceSortClick() {
+        _uiState.update { it.copy(priceSort = it.priceSort.next()).withFilteredProducts() }
+    }
+
+    // Autonomie : remet tous les filtres à zéro (les favoris sont conservés)
+    fun onResetFilters() {
+        _uiState.update { currentState ->
+            ProductCatalogUiState(
+                categories = allCategories,
+                favoriteProductIds = currentState.favoriteProductIds
+            ).withFilteredProducts()
         }
     }
 }
@@ -273,6 +312,13 @@ fun ProductCatalogContainer(
         onToggleStockFilter = viewModel::onToggleStockFilter,
         favoriteProductIds = uiState.favoriteProductIds,
         onFavoriteClick = viewModel::onFavoriteClick,
+        selectedCategory = uiState.selectedCategory,
+        onCategoryClick = viewModel::onCategoryClick,
+        showOnlyFavorites = uiState.showOnlyFavorites,
+        onToggleFavoritesFilter = viewModel::onToggleFavoritesFilter,
+        priceSort = uiState.priceSort,
+        onPriceSortClick = viewModel::onPriceSortClick,
+        onResetFilters = viewModel::onResetFilters,
         onProductClick = onProductClick,
         modifier = modifier
     )
@@ -290,7 +336,15 @@ fun ProductCatalogScreen(
     favoriteProductIds: List<Int>,
     onFavoriteClick: (Int) -> Unit,
     onProductClick: (ProductUi) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // autonomie : valeurs par défaut pour que les previews restent simples
+    selectedCategory: String? = null,
+    onCategoryClick: (String) -> Unit = {},
+    showOnlyFavorites: Boolean = false,
+    onToggleFavoritesFilter: () -> Unit = {},
+    priceSort: PriceSort = PriceSort.NONE,
+    onPriceSortClick: () -> Unit = {},
+    onResetFilters: () -> Unit = {}
 ) {
     LazyColumn(
         modifier = modifier
@@ -335,13 +389,36 @@ fun ProductCatalogScreen(
             }
         }
         item {
+            // autonomie : filtre favoris + tri par prix
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = showOnlyFavorites,
+                    onClick = onToggleFavoritesFilter,
+                    label = { Text(text = "Favoris uniquement") }
+                )
+                OutlinedButton(onClick = onPriceSortClick) {
+                    Text(text = priceSort.label)
+                }
+            }
+        }
+        item {
+            CategoryRow(
+                categories = categories,
+                selectedCategory = selectedCategory,
+                onCategoryClick = onCategoryClick
+            )
+        }
+        item {
             Text(
                 text = "${products.size} produit(s) affiché(s)",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
-        item {
-            CategoryRow(categories = categories)
+        // autonomie : message quand aucun produit ne correspond aux filtres
+        if (products.isEmpty()) {
+            item {
+                EmptyCatalogMessage(onResetFilters = onResetFilters)
+            }
         }
         // une carte par produit, l'id sert de clé stable
         items(
@@ -366,14 +443,38 @@ fun ProductCatalogScreen(
 @Composable
 fun CategoryRow(
     categories: List<String>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    selectedCategory: String? = null,
+    onCategoryClick: (String) -> Unit = {}
 ) {
     LazyRow(
         modifier = modifier,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         items(categories) { category ->
-            CategoryChip(label = category)
+            CategoryChip(
+                label = category,
+                isSelected = category == selectedCategory,
+                onClick = { onCategoryClick(category) }
+            )
+        }
+    }
+}
+
+// Autonomie : affiché quand les filtres ne laissent aucun produit
+@Composable
+fun EmptyCatalogMessage(
+    onResetFilters: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Aucun produit ne correspond à votre recherche.",
+            style = MaterialTheme.typography.titleMedium
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onResetFilters) {
+            Text(text = "Réinitialiser les filtres")
         }
     }
 }
@@ -786,13 +887,16 @@ fun ProductQuickInfoRow(
 @Composable
 fun CategoryChip(
     label: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isSelected: Boolean = false,
+    onClick: (() -> Unit)? = null // null = chip simple, non cliquable (accueil du TP5)
 ) {
     // la Surface donne le fond, le Text prend automatiquement contentColor
+    // autonomie : la catégorie sélectionnée prend la couleur primary
     Surface(
-        modifier = modifier,
+        modifier = if (onClick != null) modifier.clickable(onClick = onClick) else modifier,
         shape = MaterialTheme.shapes.extraLarge,
-        color = MaterialTheme.colorScheme.secondary,
+        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
         contentColor = MaterialTheme.colorScheme.onPrimary
     ) {
         Text(
