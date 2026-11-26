@@ -50,9 +50,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             ProductExplorerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // TP6 : l'app s'ouvre sur le catalogue (accueil et détail existent toujours)
-                    ProductCatalogScreen(
+                    // MainActivity fournit les données, le container gère l'état, l'écran affiche
+                    ProductCatalogContainer(
                         products = sampleProducts(),
+                        categories = sampleCategories(),
                         onProductClick = {
                             // Plus tard : ouvrir le détail du produit
                         },
@@ -169,14 +170,18 @@ fun sampleCategories(): List<String> {
 
 // ---------- TP6 : catalogue de produits ----------
 
-// Tout l'écran est une LazyColumn : seuls les éléments visibles sont composés
+// ---------- TP9 : State Hoisting ----------
+// Les données descendent, les événements remontent.
+
+// Composable STATEFUL : il possède l'état du catalogue et calcule la liste filtrée
 @Composable
-fun ProductCatalogScreen(
+fun ProductCatalogContainer(
     products: List<ProductUi>,
+    categories: List<String>,
     onProductClick: (ProductUi) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // TP8 : états de l'écran. rememberSaveable les garde si l'écran est recréé (rotation)
+    // rememberSaveable garde les valeurs si l'écran est recréé (rotation)
     var searchQuery by rememberSaveable {
         mutableStateOf("")
     }
@@ -202,7 +207,7 @@ fun ProductCatalogScreen(
         }
     }
 
-    // ajoute ou retire un favori ; on crée une nouvelle liste pour que Compose voie le changement
+    // ajoute ou retire un favori ; nouvelle liste à chaque fois pour que Compose voie le changement
     fun toggleFavorite(productId: Int) {
         favoriteProductIds = if (favoriteProductIds.contains(productId)) {
             favoriteProductIds - productId
@@ -211,6 +216,41 @@ fun ProductCatalogScreen(
         }
     }
 
+    // on passe l'état actuel et les fonctions qui le modifient à l'écran stateless
+    ProductCatalogScreen(
+        products = filteredProducts,
+        categories = categories,
+        searchQuery = searchQuery,
+        onSearchQueryChange = { newValue ->
+            searchQuery = newValue
+        },
+        showOnlyInStock = showOnlyInStock,
+        onToggleStockFilter = {
+            showOnlyInStock = !showOnlyInStock
+        },
+        favoriteProductIds = favoriteProductIds,
+        onFavoriteClick = { productId ->
+            toggleFavorite(productId)
+        },
+        onProductClick = onProductClick,
+        modifier = modifier
+    )
+}
+
+// Composable STATELESS : pas de remember ici, il affiche ce qu'il reçoit et signale les événements
+@Composable
+fun ProductCatalogScreen(
+    products: List<ProductUi>, // liste déjà filtrée par le container
+    categories: List<String>,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    showOnlyInStock: Boolean,
+    onToggleStockFilter: () -> Unit,
+    favoriteProductIds: List<Int>,
+    onFavoriteClick: (Int) -> Unit,
+    onProductClick: (ProductUi) -> Unit,
+    modifier: Modifier = Modifier
+) {
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
@@ -232,12 +272,10 @@ fun ProductCatalogScreen(
             )
         }
         item {
-            // le champ affiche searchQuery et le met à jour à chaque frappe
+            // le champ ne sait pas où est stockée la recherche : il affiche et signale
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { newValue ->
-                    searchQuery = newValue
-                },
+                onValueChange = onSearchQueryChange,
                 label = {
                     Text(text = "Rechercher un produit")
                 },
@@ -245,11 +283,7 @@ fun ProductCatalogScreen(
             )
         }
         item {
-            Button(
-                onClick = {
-                    showOnlyInStock = !showOnlyInStock
-                }
-            ) {
+            Button(onClick = onToggleStockFilter) {
                 Text(
                     text = if (showOnlyInStock) {
                         "Afficher tous les produits"
@@ -261,23 +295,23 @@ fun ProductCatalogScreen(
         }
         item {
             Text(
-                text = "${filteredProducts.size} produit(s) affiché(s)",
+                text = "${products.size} produit(s) affiché(s)",
                 style = MaterialTheme.typography.bodyMedium
             )
         }
         item {
-            CategoryRow(categories = sampleCategories())
+            CategoryRow(categories = categories)
         }
-        // une carte par produit filtré, l'id sert de clé stable
+        // une carte par produit, l'id sert de clé stable
         items(
-            items = filteredProducts,
+            items = products,
             key = { product -> product.id }
         ) { product ->
             ProductListItem(
                 product = product,
                 isFavorite = favoriteProductIds.contains(product.id),
                 onFavoriteClick = {
-                    toggleFavorite(product.id)
+                    onFavoriteClick(product.id)
                 },
                 onClick = {
                     onProductClick(product)
@@ -789,27 +823,17 @@ fun DailyOfferBox(
 
 // ---------- Previews ----------
 
-@Preview(showBackground = true)
-@Composable
-fun ProductCatalogScreenPreview() {
-    ProductExplorerTheme {
-        ProductCatalogScreen(
-            products = sampleProducts(),
-            onProductClick = {}
-        )
-    }
-}
-
-// TP7 : même écran, on force le thème clair puis le thème sombre
+// TP9 : les previews du catalogue passent par le container (écran complet avec son état)
 @Preview(
     showBackground = true,
     name = "Catalogue - Light Theme"
 )
 @Composable
-fun ProductCatalogScreenLightPreview() {
+fun ProductCatalogContainerLightPreview() {
     ProductExplorerTheme(darkTheme = false) {
-        ProductCatalogScreen(
+        ProductCatalogContainer(
             products = sampleProducts(),
+            categories = sampleCategories(),
             onProductClick = {}
         )
     }
@@ -820,10 +844,30 @@ fun ProductCatalogScreenLightPreview() {
     name = "Catalogue - Dark Theme"
 )
 @Composable
-fun ProductCatalogScreenDarkPreview() {
+fun ProductCatalogContainerDarkPreview() {
     ProductExplorerTheme(darkTheme = true) {
+        ProductCatalogContainer(
+            products = sampleProducts(),
+            categories = sampleCategories(),
+            onProductClick = {}
+        )
+    }
+}
+
+// L'écran stateless peut aussi s'afficher seul, en lui donnant directement les valeurs
+@Preview(showBackground = true)
+@Composable
+fun ProductCatalogScreenStatelessPreview() {
+    ProductExplorerTheme {
         ProductCatalogScreen(
             products = sampleProducts(),
+            categories = sampleCategories(),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            showOnlyInStock = false,
+            onToggleStockFilter = {},
+            favoriteProductIds = listOf(1),
+            onFavoriteClick = {},
             onProductClick = {}
         )
     }
