@@ -5,14 +5,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Button
@@ -38,10 +43,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             ProductExplorerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // TP5 : l'app s'ouvre sur l'accueil (l'écran détail du TP4 existe toujours)
-                    ProductHomeScreen(
-                        featuredProduct = sampleProduct(),
-                        onFeaturedProductClick = {
+                    // TP6 : l'app s'ouvre sur le catalogue (accueil et détail existent toujours)
+                    ProductCatalogScreen(
+                        products = sampleProducts(),
+                        onProductClick = {
                             // Plus tard : ouvrir le détail du produit
                         },
                         modifier = Modifier.padding(innerPadding)
@@ -56,6 +61,7 @@ class MainActivity : ComponentActivity() {
 
 // Les infos d'un produit à afficher (Ui = pour l'interface)
 data class ProductUi(
+    val id: Int, // identifiant unique, sert de clé dans la liste
     val title: String,
     val brand: String,
     val category: String,
@@ -71,6 +77,7 @@ data class ProductUi(
 // Produit d'exemple
 fun sampleProduct(): ProductUi {
     return ProductUi(
+        id = 1,
         title = "Smartphone Toto X",
         brand = "TotoTech",
         category = "Smartphones",
@@ -87,6 +94,7 @@ fun sampleProduct(): ProductUi {
 // Deuxième produit : en rupture de stock (pour la 2e preview)
 fun sampleProductOutOfStock(): ProductUi {
     return ProductUi(
+        id = 2,
         title = "Casque Audio Pulse",
         brand = "SoundPeak",
         category = "Audio",
@@ -99,6 +107,147 @@ fun sampleProductOutOfStock(): ProductUi {
         warrantyInformation = "Garantie constructeur : 1 an",
         shippingInformation = "Produit temporairement indisponible"
     )
+}
+
+// Liste de produits pour le catalogue (TP6)
+fun sampleProducts(): List<ProductUi> {
+    return listOf(
+        sampleProduct(),
+        sampleProductOutOfStock(),
+        ProductUi(
+            id = 3,
+            title = "Montre Connectée FitTime",
+            brand = "FitTime",
+            category = "Wearables",
+            description = "Une montre connectée simple pour suivre l'activité de la journée.",
+            price = 89.99,
+            discountPercentage = 15.0,
+            rating = 4.4,
+            stock = 18,
+            warrantyInformation = "Garantie constructeur : 2 ans",
+            shippingInformation = "Livraison estimée : 2 à 4 jours ouvrés"
+        ),
+        ProductUi(
+            id = 4,
+            title = "Enceinte Mini Boom",
+            brand = "BoomSound",
+            category = "Audio",
+            description = "Une petite enceinte pour écouter de la musique chez soi ou en déplacement.",
+            price = 59.99,
+            discountPercentage = 5.0,
+            rating = 4.1,
+            stock = 52,
+            warrantyInformation = "Garantie constructeur : 1 an",
+            shippingInformation = "Livraison estimée : 3 jours ouvrés"
+        ),
+        ProductUi(
+            id = 5,
+            title = "Lampe Connectée Lumo",
+            brand = "Lumo",
+            category = "Maison",
+            description = "Une lampe qui se règle depuis le téléphone, avec plusieurs ambiances.",
+            price = 39.99,
+            discountPercentage = 0.0,
+            rating = 4.0,
+            stock = 7,
+            warrantyInformation = "Garantie constructeur : 2 ans",
+            shippingInformation = "Livraison estimée : 2 jours ouvrés"
+        )
+    )
+}
+
+fun sampleCategories(): List<String> {
+    return listOf("Smartphones", "Audio", "Wearables", "Maison")
+}
+
+// ---------- TP6 : catalogue de produits ----------
+
+// Tout l'écran est une LazyColumn : seuls les éléments visibles sont composés
+@Composable
+fun ProductCatalogScreen(
+    products: List<ProductUi>,
+    onProductClick: (ProductUi) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text(
+                text = "Catalogue produits",
+                style = MaterialTheme.typography.headlineMedium
+            )
+        }
+        item {
+            Text(
+                text = "Explorez une sélection de produits disponibles localement.",
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+        item {
+            CategoryRow(categories = sampleCategories())
+        }
+        // un élément par produit, l'id sert de clé stable
+        items(
+            items = products,
+            key = { product -> product.id }
+        ) { product ->
+            ProductListItem(
+                product = product,
+                onClick = {
+                    onProductClick(product)
+                }
+            )
+        }
+    }
+}
+
+// Catégories sur une ligne qui défile horizontalement
+@Composable
+fun CategoryRow(
+    categories: List<String>,
+    modifier: Modifier = Modifier
+) {
+    LazyRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items(categories) { category ->
+            CategoryChip(label = category)
+        }
+    }
+}
+
+// Carte réutilisable pour un produit de la liste
+@Composable
+fun ProductListItem(
+    product: ProductUi,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = product.title,
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(
+                text = product.brand,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "${product.price} € • ★ ${product.rating}",
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onClick) {
+                Text(text = "Voir le produit")
+            }
+        }
+    }
 }
 
 // ---------- TP4 : écran de détail produit ----------
@@ -528,6 +677,17 @@ fun DailyOfferBox(
 }
 
 // ---------- Previews ----------
+
+@Preview(showBackground = true)
+@Composable
+fun ProductCatalogScreenPreview() {
+    ProductExplorerTheme {
+        ProductCatalogScreen(
+            products = sampleProducts(),
+            onProductClick = {}
+        )
+    }
+}
 
 @Preview(showBackground = true)
 @Composable
