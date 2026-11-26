@@ -33,14 +33,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.productexplorer.ui.theme.ProductExplorerTheme
 
 class MainActivity : ComponentActivity() {
@@ -50,10 +50,8 @@ class MainActivity : ComponentActivity() {
         setContent {
             ProductExplorerTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    // MainActivity fournit les données, le container gère l'état, l'écran affiche
+                    // TP10 : le container récupère le ViewModel, qui fournit les données et l'état
                     ProductCatalogContainer(
-                        products = sampleProducts(),
-                        categories = sampleCategories(),
                         onProductClick = {
                             // Plus tard : ouvrir le détail du produit
                         },
@@ -170,31 +168,30 @@ fun sampleCategories(): List<String> {
 
 // ---------- TP6 : catalogue de produits ----------
 
-// ---------- TP9 : State Hoisting ----------
-// Les données descendent, les événements remontent.
+// ---------- TP10 : ViewModel ----------
 
-// Composable STATEFUL : il possède l'état du catalogue et calcule la liste filtrée
-@Composable
-fun ProductCatalogContainer(
-    products: List<ProductUi>,
-    categories: List<String>,
-    onProductClick: (ProductUi) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // rememberSaveable garde les valeurs si l'écran est recréé (rotation)
-    var searchQuery by rememberSaveable {
-        mutableStateOf("")
-    }
-    var showOnlyInStock by rememberSaveable {
-        mutableStateOf(false)
-    }
-    var favoriteProductIds by rememberSaveable {
-        mutableStateOf(listOf<Int>())
-    }
+// Le ViewModel garde l'état de l'écran catalogue. Il survit à la rotation de l'écran
+// (il n'est pas recréé avec l'Activity) et sépare la logique de l'interface.
+class ProductCatalogViewModel : ViewModel() {
 
-    // recalculée seulement quand products, searchQuery ou showOnlyInStock changent
-    val filteredProducts = remember(products, searchQuery, showOnlyInStock) {
-        products.filter { product ->
+    // données locales : c'est maintenant le ViewModel qui les fournit
+    private val allProducts: List<ProductUi> = sampleProducts()
+
+    val categories: List<String> = sampleCategories()
+
+    // états observés par Compose ; private set = modifiables seulement depuis le ViewModel
+    var searchQuery by mutableStateOf("")
+        private set
+
+    var showOnlyInStock by mutableStateOf(false)
+        private set
+
+    var favoriteProductIds by mutableStateOf(listOf<Int>())
+        private set
+
+    // liste affichée, calculée à partir de l'état actuel
+    val filteredProducts: List<ProductUi>
+        get() = allProducts.filter { product ->
             val matchesSearch =
                 product.title.contains(searchQuery, ignoreCase = true) ||
                     product.brand.contains(searchQuery, ignoreCase = true) ||
@@ -205,33 +202,41 @@ fun ProductCatalogContainer(
 
             matchesSearch && matchesStock
         }
+
+    // événements envoyés par l'interface
+    fun onSearchQueryChange(newValue: String) {
+        searchQuery = newValue
     }
 
-    // ajoute ou retire un favori ; nouvelle liste à chaque fois pour que Compose voie le changement
-    fun toggleFavorite(productId: Int) {
+    fun onToggleStockFilter() {
+        showOnlyInStock = !showOnlyInStock
+    }
+
+    fun onFavoriteClick(productId: Int) {
         favoriteProductIds = if (favoriteProductIds.contains(productId)) {
             favoriteProductIds - productId
         } else {
             favoriteProductIds + productId
         }
     }
+}
 
-    // on passe l'état actuel et les fonctions qui le modifient à l'écran stateless
+// Le container fait le lien entre le ViewModel et l'écran stateless
+@Composable
+fun ProductCatalogContainer(
+    onProductClick: (ProductUi) -> Unit,
+    modifier: Modifier = Modifier,
+    viewModel: ProductCatalogViewModel = viewModel()
+) {
     ProductCatalogScreen(
-        products = filteredProducts,
-        categories = categories,
-        searchQuery = searchQuery,
-        onSearchQueryChange = { newValue ->
-            searchQuery = newValue
-        },
-        showOnlyInStock = showOnlyInStock,
-        onToggleStockFilter = {
-            showOnlyInStock = !showOnlyInStock
-        },
-        favoriteProductIds = favoriteProductIds,
-        onFavoriteClick = { productId ->
-            toggleFavorite(productId)
-        },
+        products = viewModel.filteredProducts,
+        categories = viewModel.categories,
+        searchQuery = viewModel.searchQuery,
+        onSearchQueryChange = viewModel::onSearchQueryChange,
+        showOnlyInStock = viewModel.showOnlyInStock,
+        onToggleStockFilter = viewModel::onToggleStockFilter,
+        favoriteProductIds = viewModel.favoriteProductIds,
+        onFavoriteClick = viewModel::onFavoriteClick,
         onProductClick = onProductClick,
         modifier = modifier
     )
@@ -823,17 +828,23 @@ fun DailyOfferBox(
 
 // ---------- Previews ----------
 
-// TP9 : les previews du catalogue passent par le container (écran complet avec son état)
+// TP10 : les previews utilisent l'écran stateless (pas de ViewModel dans une preview)
 @Preview(
     showBackground = true,
     name = "Catalogue - Light Theme"
 )
 @Composable
-fun ProductCatalogContainerLightPreview() {
+fun ProductCatalogScreenLightPreview() {
     ProductExplorerTheme(darkTheme = false) {
-        ProductCatalogContainer(
+        ProductCatalogScreen(
             products = sampleProducts(),
             categories = sampleCategories(),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            showOnlyInStock = false,
+            onToggleStockFilter = {},
+            favoriteProductIds = listOf(1),
+            onFavoriteClick = {},
             onProductClick = {}
         )
     }
@@ -844,11 +855,17 @@ fun ProductCatalogContainerLightPreview() {
     name = "Catalogue - Dark Theme"
 )
 @Composable
-fun ProductCatalogContainerDarkPreview() {
+fun ProductCatalogScreenDarkPreview() {
     ProductExplorerTheme(darkTheme = true) {
-        ProductCatalogContainer(
-            products = sampleProducts(),
+        ProductCatalogScreen(
+            products = sampleProducts().filter { it.stock > 0 },
             categories = sampleCategories(),
+            searchQuery = "",
+            onSearchQueryChange = {},
+            showOnlyInStock = true,
+            onToggleStockFilter = {},
+            favoriteProductIds = listOf(3),
+            onFavoriteClick = {},
             onProductClick = {}
         )
     }
